@@ -62,6 +62,11 @@ const RADII  = [0, 16, 30, 50];   // por tamaño 1, 2, 3
 const SPEEDS = [0, 85, 55, 32];   // velocidad base por tamaño
 const POINTS = [0, 100, 50, 20];  // puntos por tamaño
 
+const HUNTER_POINTS = 250;
+const HUNTER_SPEED  = 90;
+const HUNTER_RADIUS = 14;
+const HUNTER_HP     = 3;
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -290,8 +295,105 @@ class PowerUp {
   }
 }
 
+// ── Hunter ────────────────────────────────────────────────────────────────────
+class Hunter {
+  constructor() {
+    const edge = randInt(0, 3);
+    if (edge === 0) { this.x = rand(0, W); this.y = 0; }
+    else if (edge === 1) { this.x = rand(0, W); this.y = H; }
+    else if (edge === 2) { this.x = 0;          this.y = rand(0, H); }
+    else                 { this.x = W;           this.y = rand(0, H); }
+
+    this.vx       = 0;
+    this.vy       = 0;
+    this.angle    = 0;
+    this.radius   = HUNTER_RADIUS;
+    this.dead     = false;
+    this.hp       = HUNTER_HP;
+    this.maxHp    = HUNTER_HP;
+    this.hitFlash = 0;
+  }
+
+  _toroidalDelta(a, b, max) {
+    let d = b - a;
+    if (d >  max / 2) d -= max;
+    if (d < -max / 2) d += max;
+    return d;
+  }
+
+  update(dt) {
+    if (this.hitFlash > 0) this.hitFlash -= dt;
+
+    const dx = this._toroidalDelta(this.x, ship.x, W);
+    const dy = this._toroidalDelta(this.y, ship.y, H);
+    const targetAngle = Math.atan2(dy, dx);
+
+    const ACCEL = 180;
+    this.vx += Math.cos(targetAngle) * ACCEL * dt;
+    this.vy += Math.sin(targetAngle) * ACCEL * dt;
+
+    const speed = Math.hypot(this.vx, this.vy);
+    if (speed > HUNTER_SPEED) {
+      this.vx = (this.vx / speed) * HUNTER_SPEED;
+      this.vy = (this.vy / speed) * HUNTER_SPEED;
+    }
+
+    if (speed > 5) this.angle = Math.atan2(this.vy, this.vx);
+
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+  }
+
+  draw() {
+    const flashing = this.hitFlash > 0;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+
+    ctx.shadowColor = flashing ? '#fff' : '#f60';
+    ctx.shadowBlur  = flashing ? 18 : 10;
+    ctx.strokeStyle = flashing ? '#fff' : '#f64';
+    ctx.fillStyle   = flashing ? 'rgba(255,255,255,0.35)' : 'rgba(255,80,0,0.18)';
+    ctx.lineWidth   = 1.8;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo( 16,  0);
+    ctx.lineTo(-10, -8);
+    ctx.lineTo( -5,  0);
+    ctx.lineTo(-10,  8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowBlur  = 4;
+    ctx.fillStyle   = '#ff4';
+    ctx.beginPath();
+    ctx.arc(2, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barra de vida (en espacio world, sin rotación)
+    ctx.rotate(-this.angle);
+    const BAR_W = 28;
+    const BAR_H = 3;
+    const barX  = -BAR_W / 2;
+    const barY  = -HUNTER_RADIUS - 7;
+    const ratio = this.hp / this.maxHp;
+    const hpColor = ratio > 0.6 ? '#0f0' : ratio > 0.3 ? '#ff0' : '#f00';
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(barX - 1, barY - 1, BAR_W + 2, BAR_H + 2);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(barX, barY, BAR_W, BAR_H);
+    ctx.fillStyle = hpColor;
+    ctx.fillRect(barX, barY, Math.round(BAR_W * ratio), BAR_H);
+
+    ctx.restore();
+  }
+}
+
 // ── Estado del juego ──────────────────────────────────────────────────────────
-let ship, bullets, asteroids, particles, powerups;
+let ship, bullets, asteroids, particles, powerups, hunters;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
@@ -315,12 +417,14 @@ function initGame() {
   asteroids = [];
   particles = [];
   powerups  = [];
+  hunters   = [];
   levelPowerupDropped = false;
   score  = 0;
   lives  = 3;
   level  = 1;
   state  = 'playing';
   spawnAsteroids(4);
+  hunters.push(new Hunter());
 }
 
 function nextLevel() {
@@ -328,9 +432,11 @@ function nextLevel() {
   bullets   = [];
   particles = [];
   powerups  = [];
+  hunters   = [];
   levelPowerupDropped = false;
   ship.reset();
   spawnAsteroids(3 + level);
+  hunters.push(new Hunter());
 }
 
 function explode(x, y, count = 8) {
@@ -355,6 +461,7 @@ function update(dt) {
     if (pressed('Space')) initGame();
     particles.forEach(p => p.update(dt));
     particles = particles.filter(p => !p.dead);
+    hunters.forEach(h => h.update(dt));
     return;
   }
 
@@ -365,6 +472,7 @@ function update(dt) {
     asteroids.forEach(a => a.update(dt));
     powerups.forEach(p => p.update(dt));
     powerups = powerups.filter(p => !p.dead);
+    hunters.forEach(h => h.update(dt));
     if (deadTimer <= 0) { state = 'playing'; ship.reset(); }
     return;
   }
@@ -378,6 +486,7 @@ function update(dt) {
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
   particles.forEach(p => p.update(dt));
+  hunters.forEach(h => h.update(dt));
 
   bullets   = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
@@ -402,6 +511,26 @@ function update(dt) {
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
 
+  // Bala vs Cazador
+  for (const b of bullets) {
+    for (const h of hunters) {
+      if (!h.dead && !b.dead && dist(b, h) < h.radius) {
+        b.dead = true;
+        h.hp--;
+        h.hitFlash = 0.12;
+        if (h.hp <= 0) {
+          h.dead = true;
+          score += HUNTER_POINTS;
+          explode(h.x, h.y, 12);
+        } else {
+          explode(h.x, h.y, 3);
+        }
+      }
+    }
+  }
+  hunters = hunters.filter(h => !h.dead);
+  bullets = bullets.filter(b => !b.dead);
+
   // Power-up update y colisión nave-powerup
   powerups.forEach(p => p.update(dt));
   for (const p of powerups) {
@@ -416,6 +545,16 @@ function update(dt) {
   if (ship.invincible <= 0) {
     for (const a of asteroids) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
+        killShip();
+        break;
+      }
+    }
+  }
+
+  // Nave vs Cazador
+  if (ship.invincible <= 0) {
+    for (const h of hunters) {
+      if (dist(ship, h) < ship.radius + h.radius) {
         killShip();
         break;
       }
@@ -494,6 +633,7 @@ function draw() {
 
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
+  hunters.forEach(h => h.draw());
   powerups.forEach(p => p.draw());
   bullets.forEach(b => b.draw());
   ship.draw();
