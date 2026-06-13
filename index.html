@@ -13,14 +13,19 @@
       justify-content: center;
       height: 100vh;
     }
-    canvas {
+    /* PixiJS inserta su propio <canvas>; lo estilizamos vía esta clase */
+    #game canvas {
       display: block;
       border: 1px solid #222;
     }
   </style>
 </head>
 <body>
-  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="game"></div>
+
+  <!-- PixiJS v8 (WebGL) vía CDN — expone el global `PIXI` -->
+  <script src="https://pixijs.download/release/pixi.js"></script>
+
   <script src="game.js"></script>
 </body>
 </html>
